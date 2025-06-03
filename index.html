@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Video Thumbnails Viewer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+    h2 { text-align: center; padding: 10px; }
+
+    #viewer {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr); /* Always 4 per row */
+      gap: 10px;
+      padding: 10px;
+      max-height: 85vh;
+      overflow-y: scroll;
+      box-sizing: border-box;
+    }
+
+    .thumb-container {
+      cursor: pointer;
+      position: relative;
+      aspect-ratio: 16 / 9;
+      background-color: #eee;
+      overflow: hidden;
+    }
+
+    .thumb-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      background-color: rgba(0, 0, 0, 0.8);
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-content {
+      position: relative;
+      width: 90%;
+      max-width: 960px;
+      background: transparent;
+    }
+
+    #popupVideo {
+      width: 100%;
+      height: auto;
+      max-height: 90vh;
+      outline: none;
+      border-radius: 6px;
+    }
+
+    .skeleton {
+      background: linear-gradient(90deg, #eee 25%, #ddd 37%, #eee 63%);
+      background-size: 400% 100%;
+      animation: skeleton-loading 1.4s ease infinite;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 6px;
+    }
+
+    @keyframes skeleton-loading {
+      0% { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+  </style>
+</head>
+<body>
+
+<h2>Scrollable Video Thumbnails</h2>
+<div id="viewer"></div>
+
+<div id="videoModal" class="modal">
+  <div class="modal-content">
+    <video id="popupVideo" controls autoplay></video>
+  </div>
+</div>
+
+<script>
+let start = 0;
+let loading = false;
+const loadedIndices = new Set();
+const viewer = document.getElementById("viewer");
+const modal = document.getElementById("videoModal");
+const popupVideo = document.getElementById("popupVideo");
+
+async function loadThumbnails(batchSize = 8) {
+  if (loading) return;
+  loading = true;
+
+  // Add skeletons
+  const skeletonElements = [];
+  for (let i = 0; i < batchSize; i++) {
+    const skeleton = document.createElement("div");
+    skeleton.className = "thumb-container skeleton";
+    viewer.appendChild(skeleton);
+    skeletonElements.push(skeleton);
+  }
+
+  try {
+    const res = await fetch(`/thumbnails?start=${start}&count=${batchSize}`);
+    const data = await res.json();
+
+    // Remove skeletons only if thumbnails are valid
+    skeletonElements.forEach(s => s.remove());
+
+    const validItems = data.filter(item => !loadedIndices.has(item.index));
+    validItems.forEach(item => loadedIndices.add(item.index));
+
+    // Only keep complete rows
+    const rowRemainder = validItems.length % 4;
+    const fullRowItems = rowRemainder === 0 ? validItems : validItems.slice(0, validItems.length - rowRemainder);
+
+    fullRowItems.forEach(item => {
+      const div = document.createElement("div");
+      div.className = "thumb-container";
+      div.innerHTML = `<img src="${item.thumb}" loading="lazy" data-video="${item.video}" title="Click to play" />`;
+
+      div.onclick = () => {
+        popupVideo.src = item.video;
+        popupVideo.currentTime = 0;
+        popupVideo.load();
+        modal.style.display = "flex";
+        popupVideo.play();
+      };
+
+      viewer.appendChild(div);
+    });
+
+    start += batchSize;
+  } catch (err) {
+    console.error("Error loading thumbnails:", err);
+  }
+
+  loading = false;
+}
+
+// Close popup when clicking outside the video
+modal.onclick = (e) => {
+  if (e.target === modal) {
+    popupVideo.pause();
+    popupVideo.src = "";
+    modal.style.display = "none";
+  }
+};
+
+// Scroll detection for infinite loading
+viewer.addEventListener("scroll", () => {
+  const scrollBottom = viewer.scrollTop + viewer.clientHeight;
+  const scrollHeight = viewer.scrollHeight;
+
+  if (scrollBottom >= scrollHeight - (scrollHeight * 0.25)) {
+    loadThumbnails(8); // Load next batch
+  }
+
+  popupVideo.pause();
+  modal.style.display = "none";
+});
+
+// Load initial thumbnails
+loadThumbnails(16);
+</script>
+
+</body>
+</html>
